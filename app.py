@@ -174,44 +174,78 @@ if menu == "📂 Document Scanner":
         st.markdown(f'<a href="data:application/octet-stream;base64,{b64}" download="Forensic_Report.pdf"><b>📥 Download Report as PDF</b></a>', unsafe_allow_html=True)
 
 # ==========================================
-# MODULE 2: DRAFT REPLY
+# MODULE 2: DRAFT REPLY (UPDATED FOR SUB-CON PROTECTION)
 # ==========================================
 elif menu == "✍️ Draft Reply/Defense":
     st.title("✍️ Correspondence Drafter")
+    st.markdown("### 🛡️ Protect Your Position")
+    
     col1, col2 = st.columns([1,1])
     with col1:
         uploaded_file = st.file_uploader("Reference PDF (Incoming Letter)", type=["pdf"])
+    
     with col2:
-        sender_role = st.selectbox("From:", ["Main Contractor", "Domestic Sub-Con", "NSC", "Supplier"])
+        # SPECIFIC "ALI BABA" PROTECTION OPTIONS
+        sender_role = st.selectbox("I am writing as:", 
+            ["Sub-Contractor (Writing to Main Contractor)", 
+             "Nominated Sub-Contractor (NSC)", 
+             "Main Contractor (Writing to Client/S.O.)", 
+             "Supplier"])
         
-        # USING MASTER LIST
-        contract_type = st.selectbox("Contract Version:", MASTER_CONTRACT_LIST)
-        
-        # INTELLIGENT RECIPIENT LOGIC
-        if "Design & Build" in contract_type: def_to = "The Project Director (P.D.)"
-        elif "PWD" in contract_type: def_to = "The Superintending Officer (S.O.)"
-        elif "PAM" in contract_type or "HDA" in contract_type: def_to = "The Architect"
-        elif "IEM" in contract_type or "FIDIC" in contract_type: def_to = "The Engineer"
-        else: def_to = "The Contract Administrator"
+        # DYNAMIC RECIPIENT LOGIC
+        if "Writing to Main Contractor" in sender_role:
+            def_to = "The Project Manager (Main Contractor)"
+            placeholder_text = "e.g., Demand payment. They have been paid by Client but haven't paid us (CIPAA warning)."
+        elif "Main Contractor" in sender_role:
+            def_to = "The Superintending Officer (S.O.)"
+            placeholder_text = "e.g., Claim EOT due to late site possession."
+        else:
+            def_to = "The Contract Administrator"
+            placeholder_text = "e.g., Notice of delay due to material shortage."
             
         recipient = st.text_input("To:", value=def_to)
-        goal = st.text_area("Goal:", placeholder="e.g., Claim for EOT under Clause 43 (PWD 75 2006).")
+        
+        # SHARED MASTER LIST (Ensure this variable exists in your main code)
+        contract_type = st.selectbox("Governing Contract:", MASTER_CONTRACT_LIST)
+        
+        goal = st.text_area("Goal / Issue:", height=100, placeholder=placeholder_text)
 
-    if st.button("Generate Letter"):
-        with st.spinner("Drafting..."):
+    if st.button("Generate Formal Letter"):
+        with st.spinner("Drafting contractual defense..."):
+            
+            # SPECIAL LOGIC FOR SUB-CON vs MAIN CON (ALI BABA CONTEXT)
+            extra_instruction = ""
+            if "Sub-Contractor" in sender_role:
+                extra_instruction = """
+                CRITICAL STRATEGY FOR SUB-CONTRACTOR:
+                - You are likely doing the actual work while the Main Contractor holds the license.
+                - If the issue is Payment: Remind them that 'Pay-When-Paid' is void under CIPAA 2012 Section 35.
+                - If the issue is Instructions: Demand a 'Written Instruction' (AI) before proceeding with VOs.
+                - Tone: Firm, contractual, establishing a 'paper trail' for future adjudication if needed.
+                """
+
             prompt_text = f"""
             {MY_CONTEXT}
             TASK: Draft a formal contractual letter.
-            CONTEXT: The project is governed by {contract_type}.
             
-            FROM: {sender_role} TO: {recipient}
+            CONTEXT:
+            - Project governed by: {contract_type}
+            - Sender: {sender_role}
+            - Recipient: {recipient}
+            
             GOAL: {goal}
             
+            {extra_instruction}
+            
             GUIDANCE:
-            - Use correct administrator title.
-            - Reference relevant clauses for {contract_type} (Note specific version differences).
+            - Use correct titles (S.O., P.D., Main Con).
+            - Cite specific clauses from {contract_type}.
+            - If claiming Loss & Expense, ensure "Notice" requirements are met.
             """
+            
             inputs = [prompt_text]
+            
+            # Handle File Attachment
             if uploaded_file:
                 with open("temp.pdf", "wb") as f: f.write(uploaded_file.getbuffer())
                 sample_file = genai.upload_file(path="temp.pdf", display_name="Context")
@@ -219,17 +253,18 @@ elif menu == "✍️ Draft Reply/Defense":
                 inputs.insert(0, sample_file)
 
             response = model.generate_content(inputs)
+            
             st.markdown("---")
-            st.subheader("✉️ Draft")
+            st.subheader("✉️ Drafted Letter")
             st.text_area("Copy:", value=response.text, height=400)
             
-            # PDF Download for Letter
+            # PDF Download
             pdf = PDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
             clean_text = response.text.replace("**", "").encode('latin-1', 'replace').decode('latin-1')
             pdf.multi_cell(0, 5, clean_text)
             b64 = base64.b64encode(pdf.output(dest='S').encode('latin-1')).decode()
             st.markdown(f'<a href="data:application/octet-stream;base64,{b64}" download="Draft_Letter.pdf"><b>📥 Download Letter as PDF</b></a>', unsafe_allow_html=True)
-
+            
 # ==========================================
 # MODULE 3: CONTRACT CREATOR
 # ==========================================
