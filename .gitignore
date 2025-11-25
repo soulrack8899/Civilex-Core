@@ -1,0 +1,11 @@
+# Ignore Secrets and Keys
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# Ignore Temporary Files
+*.pdf
+temp.pdf
+
+# Ignore Python junk
+__pycache__/
+*.pyc
