@@ -4,9 +4,10 @@ import time
 from fpdf import FPDF
 import base64
 import os
+import pandas as pd 
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="Civilex | Master Contract Manager", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Civilex | Master Contract & Tender Manager", page_icon="🛡️", layout="wide")
 
 # --- PDF CLASS ---
 class PDF(FPDF):
@@ -27,9 +28,8 @@ else:
     api_key = st.sidebar.text_input("Google API Key", type="password")
 
 # ==========================================
-# 📂 FILE MANAGER LOGIC (M365 INTEGRATED)
+# 📂 FILE MANAGER LOGIC (SMART SORTING)
 # ==========================================
-# 1. AUTO-DETECT ONEDRIVE
 onedrive_path = os.environ.get("OneDrive") 
 if onedrive_path:
     PROJECTS_ROOT = os.path.join(onedrive_path, "Civilex_Projects")
@@ -38,32 +38,49 @@ else:
     PROJECTS_ROOT = "Civil_Projects"
     STORAGE_MODE = "💻 Local Storage"
 
-# 2. FUNCTIONS
 def get_projects():
     if not os.path.exists(PROJECTS_ROOT):
         os.makedirs(PROJECTS_ROOT)
     return [f.name for f in os.scandir(PROJECTS_ROOT) if f.is_dir()]
 
 def create_project_folder(name):
+    """Creates a new project folder with AUTOMATIC TENDER SORTING."""
     clean_name = "".join([c for c in name if c.isalnum() or c in " -_"]).strip()
     path = os.path.join(PROJECTS_ROOT, clean_name)
+    
     if not os.path.exists(path):
+        # 1. Contract Administration Folders
         os.makedirs(f"{path}/Incoming_Letters")
         os.makedirs(f"{path}/Outgoing_Drafts")
         os.makedirs(f"{path}/Contracts")
+        
+        # 2. Tender & Estimating Folders (New)
+        os.makedirs(f"{path}/Tenders/01_BQ_Documents")
+        os.makedirs(f"{path}/Tenders/02_Supplier_Quotes")
+        os.makedirs(f"{path}/Tenders/03_Cost_Analysis")
+        os.makedirs(f"{path}/Tenders/04_Final_Submission")
         return True
     return False
 
 def save_to_project(project_name, file_bytes, file_name, subfolder):
-    """Saves binary files (PDFs)"""
-    save_path = os.path.join(PROJECTS_ROOT, project_name, subfolder, file_name)
+    """Saves binary files (PDFs) to the correct subfolder."""
+    # Ensure subfolder exists even if created manually
+    full_folder_path = os.path.join(PROJECTS_ROOT, project_name, subfolder)
+    if not os.path.exists(full_folder_path):
+        os.makedirs(full_folder_path)
+        
+    save_path = os.path.join(full_folder_path, file_name)
     with open(save_path, "wb") as f:
         f.write(file_bytes)
     return save_path
 
 def save_text_to_project(project_name, text_content, file_name, subfolder):
-    """Saves text files (Drafts)"""
-    save_path = os.path.join(PROJECTS_ROOT, project_name, subfolder, file_name)
+    """Saves text/markdown files."""
+    full_folder_path = os.path.join(PROJECTS_ROOT, project_name, subfolder)
+    if not os.path.exists(full_folder_path):
+        os.makedirs(full_folder_path)
+
+    save_path = os.path.join(full_folder_path, file_name)
     with open(save_path, "w") as f:
         f.write(text_content)
     return save_path
@@ -109,7 +126,7 @@ with st.sidebar:
     st.title("Civilex Manager")
     st.caption(f"Storage: {STORAGE_MODE}")
     
-    # --- PROJECT SELECTOR (THE NEW FEATURE) ---
+    # --- PROJECT SELECTOR ---
     st.markdown("### 🏗️ Active Project")
     project_list = get_projects()
     
@@ -117,11 +134,11 @@ with st.sidebar:
     
     current_project = None
     if proj_mode == "Create New":
-        new_proj = st.text_input("Project Name (e.g. Jalan Bau):")
+        new_proj = st.text_input("New Project Name:")
         if st.button("Create Folder"):
             if new_proj:
                 create_project_folder(new_proj)
-                st.success("Created!")
+                st.success(f"Created {new_proj}!")
                 time.sleep(0.5)
                 st.rerun()
     else:
@@ -133,10 +150,16 @@ with st.sidebar:
 
     st.markdown("---")
     
-    with st.expander("📚 Library Scope", expanded=False):
-        st.caption("Includes all PWD, PAM, IEM, CIDB, FIDIC & HDA variations.")
+    with st.expander("📚 Master Library", expanded=False):
+        st.caption("Includes PWD, PAM, IEM, CIDB, FIDIC & JKR SOR Logic.")
     
-    menu = st.radio("Select Module:", ["📂 Document Scanner", "✍️ Draft Reply/Defense", "📝 Create Contract/Deed"])
+    # MENU
+    menu = st.radio("Select Module:", 
+        ["📂 Document Scanner", 
+         "✍️ Draft Reply/Defense", 
+         "📝 Create Contract/Deed",
+         "💰 Smart Estimator (Pre-Contract)"])
+    
     st.markdown("---")
 
 # --- MAIN APP LOGIC ---
@@ -203,11 +226,9 @@ if menu == "📂 Document Scanner":
         if st.button("🚀 Run Forensic Audit"):
             with st.spinner("🕵️ Detecting Contract Version (Legacy vs Current)..."):
                 
-                # 1. SAVE TO PROJECT (If selected)
                 if current_project:
                     save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
                 
-                # 2. PROCESS
                 with open("temp.pdf", "wb") as f: f.write(uploaded_file.getbuffer())
                 sample_file = genai.upload_file(path="temp.pdf", display_name="Scan")
                 while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
@@ -252,7 +273,7 @@ elif menu == "✍️ Draft Reply/Defense":
 
     col1, col2 = st.columns([1,1])
     with col1:
-        uploaded_file = st.file_uploader("Reference PDF (Incoming Letter)", type=["pdf"])
+        uploaded_file = st.file_uploader("Incoming Letter (PDF)", type=["pdf"])
     with col2:
         sender_role = st.selectbox("From:", ["Sub-Contractor (to Main Con)", "Main Contractor (to Client)", "NSC", "Supplier"])
         contract_type = st.selectbox("Contract Version:", MASTER_CONTRACT_LIST)
@@ -269,11 +290,9 @@ elif menu == "✍️ Draft Reply/Defense":
     if st.button("Generate Letter"):
         with st.spinner("Drafting..."):
             
-            # 1. SAVE UPLOAD
             if uploaded_file and current_project:
                 save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
             
-            # 2. GENERATE
             prompt_text = f"""
             {MY_CONTEXT}
             TASK: Draft a formal contractual letter.
@@ -291,7 +310,6 @@ elif menu == "✍️ Draft Reply/Defense":
 
             response = model.generate_content(inputs)
             
-            # 3. SAVE DRAFT
             if current_project:
                 filename = f"Draft_{int(time.time())}.txt"
                 save_text_to_project(current_project, response.text, filename, "Outgoing_Drafts")
@@ -312,55 +330,111 @@ elif menu == "✍️ Draft Reply/Defense":
 # ==========================================
 elif menu == "📝 Create Contract/Deed":
     st.title("📝 Legal Document Generator")
-    
     col1, col2 = st.columns(2)
-    with col1:
-        base_contract = st.selectbox("1. Governing Standard Form:", MASTER_CONTRACT_LIST)     
-    with col2:
-        doc_type = st.selectbox("2. Document to Create:", 
-            ["Sub-Contract Letter of Award (Domestic)", 
-             "Nominated Sub-Contract (NSC) Agreement",
-             "Deed of Assignment (Direct Payment)", 
-             "Notice of Assignment", 
-             "Notice of Claim (EOT / L&E)",
-             "Notice of Determination (Termination)",
-             "Letter of Demand (Payment)"])
+    with col1: base_contract = st.selectbox("1. Governing Standard:", MASTER_CONTRACT_LIST)     
+    with col2: doc_type = st.selectbox("2. Document:", ["Sub-Contract LoA", "Deed of Assignment", "Notice of Assignment", "Notice of Determination"])
     
-    st.markdown("---")
-    with st.form("contract_form"):
+    with st.form("c_form"):
         c1, c2 = st.columns(2)
-        with c1:
-            project = st.text_input("Project Name")
-            my_company = st.text_input("My Company")
-        with c2:
-            other_party = st.text_input("Counterparty")
-            amount = st.text_input("Value (RM)")
-        extra_details = st.text_area("Specific Terms / Scope:", value="Back-to-back basis. Retention 5%.")
-        submitted = st.form_submit_button("🚀 Generate Document")
+        with c1: project = st.text_input("Project"); my_comp = st.text_input("My Company")
+        with c2: other = st.text_input("Counterparty"); val = st.text_input("Value")
+        extra = st.text_area("Details:", value="Back-to-back basis.")
+        sub = st.form_submit_button("🚀 Generate Document")
     
-    if submitted:
-        with st.spinner(f"Drafting {doc_type} based on {base_contract}..."):
-            prompt = f"""
-            {MY_CONTEXT}
-            TASK: Draft a {doc_type}.
-            GOVERNING LAW: {base_contract}.
-            DETAILS: Project: {project}. Parties: {my_company} vs {other_party}. Value: {amount}. Scope: {extra_details}
-            LEGAL CHECKS: Ensure Contracts Act 1950 compliance. Use specific Terminology.
-            """
+    if sub:
+        with st.spinner("Drafting..."):
+            prompt = f"{MY_CONTEXT}\n Draft {doc_type}. Base: {base_contract}. Project: {project}. Parties: {my_comp} vs {other}. Val: {val}. Terms: {extra}."
             response = model.generate_content(prompt)
-            
-            # SAVE TO PROJECT
-            if current_project:
-                filename = f"{doc_type.replace(' ', '_')}_{int(time.time())}.txt"
-                save_text_to_project(current_project, response.text, filename, "Contracts")
-                st.success(f"✅ Saved to {current_project}/Contracts/")
-                
+            if current_project: save_text_to_project(current_project, response.text, f"{doc_type}.txt", "Contracts")
             st.markdown("---")
-            st.subheader(f"📄 Draft: {doc_type}")
-            st.text_area("Copy / Edit:", value=response.text, height=500)
+            st.text_area("Result:", value=response.text, height=500)
             
+            # PDF
             pdf = PDF(); pdf.add_page(); pdf.set_font("Arial", size=10)
             clean_text = response.text.replace("**", "").encode('latin-1', 'replace').decode('latin-1')
             pdf.multi_cell(0, 5, clean_text)
             b64 = base64.b64encode(pdf.output(dest='S').encode('latin-1')).decode()
             st.markdown(f'<a href="data:application/octet-stream;base64,{b64}" download="{doc_type}.pdf"><b>📥 Download PDF</b></a>', unsafe_allow_html=True)
+
+# ==========================================
+# MODULE 4: SMART ESTIMATOR (TENDER INTELLIGENCE)
+# ==========================================
+elif menu == "💰 Smart Estimator (Pre-Contract)":
+    st.title("💰 Smart Tender Estimator")
+    st.markdown("### JKR Rate Comparison & Profit Prediction")
+    
+    if not current_project:
+        st.error("⚠️ Please Select a Project first.")
+        st.info("Estimates will be saved to 'Tenders/03_Cost_Analysis'.")
+        st.stop()
+    
+    # FOLDER MANAGEMENT
+    st.success(f"📂 Project: {current_project}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        bq_file = st.file_uploader("1. Upload Scanned BQ Page (PDF)", type=["pdf"])
+    with col2:
+        # THE LEARNING INPUT
+        sor_file = st.file_uploader("2. Upload JKR SOR 2024 (Reference)", type=["pdf"])
+        
+    st.info("💡 **How it works:** The AI reads your BQ, cross-references items with the uploaded **JKR SOR 2024**, and calculates the variance.")
+    
+    if bq_file and st.button("🚀 Analyze & Estimate"):
+        with st.spinner("Reading BQ & Comparing against JKR SOR 2024..."):
+            
+            # 1. SAVE FILES TO TENDER FOLDER
+            bq_path = save_to_project(current_project, bq_file.getbuffer(), "BQ_Scan.pdf", "Tenders/01_BQ_Documents")
+            
+            files_to_process = []
+            
+            # Upload BQ
+            sample_bq = genai.upload_file(path=bq_path, display_name="BQ")
+            files_to_process.append(sample_bq)
+            
+            # Upload SOR if provided
+            if sor_file:
+                sor_path = save_to_project(current_project, sor_file.getbuffer(), "JKR_SOR_2024.pdf", "Tenders/02_Supplier_Quotes")
+                sample_sor = genai.upload_file(path=sor_path, display_name="SOR")
+                files_to_process.append(sample_sor)
+                sor_instruction = "REFERENCE: Use the rates found in the uploaded 'JKR SOR 2024' PDF as the exact benchmark."
+            else:
+                sor_instruction = "REFERENCE: Use your internal knowledge of JKR Sarawak 2024 rates (approximate)."
+
+            # Wait for processing
+            for f in files_to_process:
+                while f.state.name == "PROCESSING": time.sleep(1); f = genai.get_file(f.name)
+
+            # 2. PROMPT FOR ESTIMATION
+            prompt = f"""
+            You are a Senior Estimator in Sarawak. 
+            
+            INPUTS:
+            1. A BQ Page (Bill of Quantities).
+            2. JKR Sarawak Schedule of Rates 2024 (SOR) - if provided.
+            
+            {sor_instruction}
+            
+            TASK:
+            1. EXTRACT items from the BQ.
+            2. MATCH each item to the JKR SOR Rate (from the reference PDF).
+            3. ESTIMATE 'Actual Market Cost' (Concrete, Steel, Labour in Kuching/Sarawak).
+            4. CALCULATE VARIANCE: (JKR Rate - Market Cost).
+            
+            OUTPUT FORMAT (Markdown Table):
+            | Item Description | Unit | Qty | JKR Rate (RM) | Market Cost (RM) | Margin/Loss |
+            
+            ANALYSIS:
+            - Highlight any items where JKR Rate < Market Cost (Loss Makers).
+            - Suggest a 'Tender Strategy' (e.g., Front-load items, or negotiate supplier rates).
+            """
+            
+            response = model.generate_content(files_to_process + [prompt])
+            
+            st.markdown("---")
+            st.subheader("📊 Cost & Profit Analysis")
+            st.markdown(response.text)
+            
+            # 3. SAVE ESTIMATE
+            save_text_to_project(current_project, response.text, "Cost_Analysis.md", "Tenders/03_Cost_Analysis")
+            st.success(f"✅ Analysis saved to {current_project}/Tenders/03_Cost_Analysis/")
