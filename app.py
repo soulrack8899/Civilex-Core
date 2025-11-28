@@ -28,7 +28,7 @@ else:
     api_key = st.sidebar.text_input("Google API Key", type="password")
 
 # ==========================================
-# 📂 FILE MANAGER LOGIC (SMART SORTING)
+# 📂 FILE MANAGER LOGIC
 # ==========================================
 onedrive_path = os.environ.get("OneDrive") 
 if onedrive_path:
@@ -44,17 +44,13 @@ def get_projects():
     return [f.name for f in os.scandir(PROJECTS_ROOT) if f.is_dir()]
 
 def create_project_folder(name):
-    """Creates a new project folder with AUTOMATIC TENDER SORTING."""
     clean_name = "".join([c for c in name if c.isalnum() or c in " -_"]).strip()
     path = os.path.join(PROJECTS_ROOT, clean_name)
     
     if not os.path.exists(path):
-        # 1. Contract Administration Folders
         os.makedirs(f"{path}/Incoming_Letters")
         os.makedirs(f"{path}/Outgoing_Drafts")
         os.makedirs(f"{path}/Contracts")
-        
-        # 2. Tender & Estimating Folders
         os.makedirs(f"{path}/Tenders/01_BQ_Documents")
         os.makedirs(f"{path}/Tenders/02_Supplier_Quotes")
         os.makedirs(f"{path}/Tenders/03_Cost_Analysis")
@@ -62,11 +58,9 @@ def create_project_folder(name):
     return False
 
 def save_to_project(project_name, file_bytes, file_name, subfolder):
-    """Saves binary files (PDF/Excel) to the correct subfolder."""
     full_folder_path = os.path.join(PROJECTS_ROOT, project_name, subfolder)
     if not os.path.exists(full_folder_path):
         os.makedirs(full_folder_path)
-        
     save_path = os.path.join(full_folder_path, file_name)
     with open(save_path, "wb") as f:
         f.write(file_bytes)
@@ -76,7 +70,6 @@ def save_text_to_project(project_name, text_content, file_name, subfolder):
     full_folder_path = os.path.join(PROJECTS_ROOT, project_name, subfolder)
     if not os.path.exists(full_folder_path):
         os.makedirs(full_folder_path)
-
     save_path = os.path.join(full_folder_path, file_name)
     with open(save_path, "w") as f:
         f.write(text_content)
@@ -87,7 +80,6 @@ MASTER_CONTRACT_LIST = [
     "--- GOVERNMENT (SARAWAK) ---",
     "PWD 75 (Sarawak) - Rev 2021 (Current)",
     "PWD 75 (Sarawak) - Rev 2006 (Legacy)", 
-    
     "--- GOVERNMENT (FEDERAL) ---",
     "PWD 203A (Federal) - Rev 1/2010 (Current)", 
     "PWD 203A (Federal) - Rev 2007 (Legacy)",
@@ -95,7 +87,6 @@ MASTER_CONTRACT_LIST = [
     "PWD Design & Build (DB) - Rev 2007",
     "PWD Form 203N (Nominated Sub-Con)",
     "PWD Form 203P (Nominated Supplier)",
-    
     "--- PRIVATE SECTOR ---",
     "PAM Contract 2018 (With Quantities)",
     "PAM Contract 2018 (Without Quantities)",
@@ -104,12 +95,10 @@ MASTER_CONTRACT_LIST = [
     "CIDB Standard Form 2022 (Collaborative)",
     "CIDB Standard Form 2000 (Legacy)",
     "AIAC Standard Form 2019",
-    
     "--- ENGINEERING ---",
     "IEM.CE 2011 (Civil Engineering)",
     "IEM.ME 2012 (Mech & Elec)",
     "IEM Form 1989 (Legacy Civil)",
-    
     "--- INTERNATIONAL / SPECIAL ---",
     "FIDIC Red Book (Construction)",
     "FIDIC Yellow Book (Design-Build)",
@@ -125,7 +114,6 @@ with st.sidebar:
     
     st.markdown("### 🏗️ Active Project")
     project_list = get_projects()
-    
     proj_mode = st.radio("Mode:", ["Select Existing", "Create New"], horizontal=True, label_visibility="collapsed")
     
     current_project = None
@@ -168,37 +156,14 @@ model = genai.GenerativeModel(model_name="models/gemini-2.5-flash")
 MY_CONTEXT = """
 STRICT LANGUAGE RULE: UK/Malaysian English spelling only (Programme, Labour, Defence, Cheque).
 ROLE: Senior Consultant Quantity Surveyor (CQS) & Contract Manager in Malaysia.
-
 MASTER KNOWLEDGE BASE (VERSIONS & AMENDMENTS) - DO NOT HALLUCINATE:
-
-1. **PWD 75 (SARAWAK STATE):**
-   - **Rev. 2006:** Legacy form (45 Clauses). Pre-CIPAA. Critical Risk: Clause 33 (Payment) may differ from statutory timelines.
-   - **Rev. 2021:** Current form (53 Clauses). Post-CIPAA. Includes "Epidemic" in Clause 40 (EOT) and new Waiver clause (Cl. 52).
-
-2. **PWD 203A (FEDERAL):**
-   - **Rev. 2007:** Legacy (78 Clauses). 
-   - **Rev. 1/2010:** Current (81 Clauses). Added clauses for Safety (Cl. 68) and Default.
-
-3. **PAM CONTRACT:**
-   - **2006:** Widespread in stalled/legacy projects.
-   - **2018:** Current. Updates to Clause 30 (Certificates) and Clause 11 (Variations).
-
-4. **CIDB FORMS:**
-   - **2000 Edition:** Traditional adversarial approach.
-   - **2022 Edition:** Collaborative approach. Introduces "Compensation Events" instead of just VOs.
-
-5. **IEM FORMS:**
-   - **1989:** Old Civil form (Modeled on old PWD).
-   - **2011 (Civil) / 2012 (ME):** Modern engineering forms. Administered by "The Engineer".
-
-6. **STATUTORY OVERRIDES (TOP PRIORITY):**
-   - **HDA:** Residential projects must use Schedule G/H.
-   - **CIPAA 2012:** Voids "Pay-When-Paid" in ALL construction contracts (Sec 35).
-   - **Contracts Act 1950:** Sec 75 requires proof of actual loss for LAD.
-
-INSTRUCTION: 
-1. Identify the EXACT Version based on the text. 
-2. Use the correct Administrator: "S.O." (JKR), "Architect" (PAM), "Engineer" (IEM/FIDIC), "P.D." (Design & Build).
+1. **PWD 75 (SARAWAK STATE):** Rev 2006 (Legacy), Rev 2021 (Current/Covid Clauses).
+2. **PWD 203A (FEDERAL):** Rev 2007 (Legacy), Rev 1/2010 (Current).
+3. **PAM CONTRACT:** 2006 (Legacy), 2018 (Current).
+4. **CIDB FORMS:** 2000 (Adversarial), 2022 (Collaborative/Compensation Events).
+5. **IEM FORMS:** 1989 (Old), 2011 (Civil), 2012 (ME).
+6. **STATUTORY:** HDA (Residential), CIPAA 2012 (Payment), Contracts Act 1950.
+INSTRUCTION: Identify the EXACT Version. Use correct Administrator.
 """
 
 # ==========================================
@@ -213,7 +178,7 @@ if menu == "📂 Document Scanner":
 
     if uploaded_file:
         if st.button("🚀 Run Forensic Audit"):
-            with st.spinner("🕵️ Detecting Contract Version (Legacy vs Current)..."):
+            with st.spinner("🕵️ Detecting Contract Version..."):
                 if current_project: save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
                 with open("temp.pdf", "wb") as f: f.write(uploaded_file.getbuffer())
                 sample_file = genai.upload_file(path="temp.pdf", display_name="Scan")
@@ -306,7 +271,7 @@ elif menu == "📝 Create Contract/Deed":
             st.markdown(f'<a href="data:application/octet-stream;base64,{b64}" download="{doc_type}.pdf"><b>📥 Download PDF</b></a>', unsafe_allow_html=True)
 
 # ==========================================
-# MODULE 4: SMART ESTIMATOR (EXCEL ENABLED)
+# MODULE 4: SMART ESTIMATOR (STABILITY FIX)
 # ==========================================
 elif menu == "💰 Smart Estimator (Pre-Contract)":
     st.title("💰 Smart Tender Estimator")
@@ -318,7 +283,7 @@ elif menu == "💰 Smart Estimator (Pre-Contract)":
     
     col1, col2 = st.columns(2)
     with col1:
-        # NOW SUPPORTS EXCEL/CSV/PDF
+        # Case insensitive check will be handled in logic
         bq_file = st.file_uploader("1. Upload BQ (PDF, Excel, CSV)", type=["pdf", "xlsx", "xls", "csv"])
     with col2:
         sor_file = st.file_uploader("2. Upload JKR SOR Reference (PDF)", type=["pdf"])
@@ -332,14 +297,15 @@ elif menu == "💰 Smart Estimator (Pre-Contract)":
             inputs = []
             prompt_context = ""
 
-            # 2. HANDLING EXCEL vs PDF
-            if bq_file.name.endswith(('.xlsx', '.xls', '.csv')):
-                # If Excel, read it as text/dataframe first
+            # 2. HANDLING EXCEL vs PDF (ROBUST CHECK)
+            file_ext = os.path.splitext(bq_file.name)[1].lower()
+            
+            if file_ext in ['.xlsx', '.xls', '.csv']:
+                # If Excel, read it as text/dataframe
                 try:
-                    if bq_file.name.endswith('.csv'):
+                    if file_ext == '.csv':
                         df = pd.read_csv(bq_file)
                     else:
-                        # NOTE: Requires 'openpyxl' installed
                         df = pd.read_excel(bq_file)
                     
                     # Convert data to string for AI
@@ -348,7 +314,7 @@ elif menu == "💰 Smart Estimator (Pre-Contract)":
                     st.success("✅ Excel BQ read successfully.")
                     
                 except ImportError:
-                    st.error("Missing optional dependency 'openpyxl'. Please run: pip install openpyxl")
+                    st.error("Missing dependency. Run: pip install openpyxl")
                     st.stop()
                 except Exception as e:
                     st.error(f"Error reading Excel: {e}")
@@ -369,9 +335,15 @@ elif menu == "💰 Smart Estimator (Pre-Contract)":
             else:
                 prompt_context += "\nREFERENCE: Use internal knowledge of JKR Sarawak rates."
 
-            # 4. WAIT FOR PROCESSING
+            # 4. WAIT FOR PROCESSING (CRITICAL SAFETY CHECK)
             for f in inputs:
-                while f.state.name == "PROCESSING": time.sleep(1); f = genai.get_file(f.name)
+                while f.state.name == "PROCESSING":
+                    time.sleep(2)
+                    f = genai.get_file(f.name)
+                
+                if f.state.name == "FAILED":
+                    st.error("Error: Google failed to process one of the files. Please retry.")
+                    st.stop()
 
             # 5. PROMPT
             final_prompt = f"""
