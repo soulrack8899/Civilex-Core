@@ -44,6 +44,7 @@ def get_projects():
     return [f.name for f in os.scandir(PROJECTS_ROOT) if f.is_dir()]
 
 def create_project_folder(name):
+    """Creates a new project folder with AUTOMATIC TENDER SORTING."""
     clean_name = "".join([c for c in name if c.isalnum() or c in " -_"]).strip()
     path = os.path.join(PROJECTS_ROOT, clean_name)
     
@@ -288,7 +289,7 @@ elif menu == "📝 Create Contract/Deed":
         with c1: project = st.text_input("Project"); my_comp = st.text_input("My Company")
         with c2: other = st.text_input("Counterparty"); val = st.text_input("Value")
         extra = st.text_area("Details:", value="Back-to-back basis.")
-        sub = st.form_submit_button("Generate")
+        sub = st.form_submit_button("🚀 Generate Document")
     
     if sub:
         with st.spinner("Drafting..."):
@@ -338,6 +339,7 @@ elif menu == "💰 Smart Estimator (Pre-Contract)":
                     if bq_file.name.endswith('.csv'):
                         df = pd.read_csv(bq_file)
                     else:
+                        # NOTE: Requires 'openpyxl' installed
                         df = pd.read_excel(bq_file)
                     
                     # Convert data to string for AI
@@ -345,6 +347,9 @@ elif menu == "💰 Smart Estimator (Pre-Contract)":
                     prompt_context += f"\n\nBQ DATA (From Excel):\n{bq_text_data}\n"
                     st.success("✅ Excel BQ read successfully.")
                     
+                except ImportError:
+                    st.error("Missing optional dependency 'openpyxl'. Please run: pip install openpyxl")
+                    st.stop()
                 except Exception as e:
                     st.error(f"Error reading Excel: {e}")
                     st.stop()
