@@ -150,7 +150,9 @@ if not api_key:
     st.stop()
 
 genai.configure(api_key=api_key)
-model = genai.GenerativeModel(model_name="models/gemini-2.5-flash")
+
+# USE STABLE 2.0 FLASH
+model = genai.GenerativeModel(model_name="models/gemini-2.0-flash")
 
 # --- INTELLIGENT CONTEXT ---
 MY_CONTEXT = """
@@ -181,11 +183,16 @@ if menu == "📂 Document Scanner":
             with st.spinner("🕵️ Detecting Contract Version..."):
                 if current_project: save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
                 with open("temp.pdf", "wb") as f: f.write(uploaded_file.getbuffer())
-                sample_file = genai.upload_file(path="temp.pdf", display_name="Scan")
+                
+                # Force MIME type for stability
+                sample_file = genai.upload_file(path="temp.pdf", display_name="Scan", mime_type="application/pdf")
+                
                 while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
 
                 prompt = f"{MY_CONTEXT}\n Forensic Audit. Identify Form & Year. Check LAD, Payment, Design Liability."
-                response = model.generate_content([sample_file, prompt])
+                
+                # API FIX: Correct List Structure
+                response = model.generate_content([prompt, sample_file])
                 st.session_state.scan_report = response.text 
     
     if st.session_state.scan_report:
@@ -220,16 +227,20 @@ elif menu == "✍️ Draft Reply/Defense":
 
     if st.button("Generate Letter"):
         with st.spinner("Drafting..."):
-            if uploaded_file and current_project: save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
             prompt_text = f"{MY_CONTEXT}\n Draft Letter. Context: {contract_type}. From: {sender_role}. To: {recipient}. Goal: {goal}."
-            inputs = [prompt_text]
+            
+            api_payload = [prompt_text]
+            
             if uploaded_file:
+                if current_project: save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
                 with open("temp.pdf", "wb") as f: f.write(uploaded_file.getbuffer())
-                sample_file = genai.upload_file(path="temp.pdf", display_name="Context")
+                sample_file = genai.upload_file(path="temp.pdf", display_name="Context", mime_type="application/pdf")
                 while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
-                inputs.insert(0, sample_file)
+                api_payload.append(sample_file)
 
-            response = model.generate_content(inputs)
+            # API FIX: Correct List Structure
+            response = model.generate_content(api_payload)
+            
             if current_project: save_text_to_project(current_project, response.text, f"Draft_{int(time.time())}.txt", "Outgoing_Drafts")
             st.markdown("---")
             st.text_area("Result:", value=response.text, height=400)
@@ -271,103 +282,138 @@ elif menu == "📝 Create Contract/Deed":
             st.markdown(f'<a href="data:application/octet-stream;base64,{b64}" download="{doc_type}.pdf"><b>📥 Download PDF</b></a>', unsafe_allow_html=True)
 
 # ==========================================
-# MODULE 4: SMART ESTIMATOR (STABILITY FIX)
+# MODULE 4: COMMERCIAL MANAGER (CASH FLOW)
 # ==========================================
-elif menu == "💰 Smart Estimator (Pre-Contract)":
-    st.title("💰 Smart Tender Estimator")
-    st.markdown("### BQ Digitizer & JKR Rate Comparison")
-    
+elif menu == "💰 Smart Estimator (Pre-Contract)": # You can rename this to "💰 Commercial Manager"
+    st.title("💰 Commercial Manager & Cash Flow")
+    st.caption("Combine Contract Clauses with Project Schedule to predict Cash Flow.")
+
     if not current_project:
         st.error("⚠️ Please Select a Project first.")
         st.stop()
+
+    # --- TAB SETUP ---
+    tab1, tab2, tab3 = st.tabs(["1. Extract Contract Terms", "2. Project Schedule", "3. Cash Flow Dashboard"])
+
+    # --- GLOBAL VARIABLES FOR THIS SESSION ---
+    if "comm_terms" not in st.session_state:
+        st.session_state.comm_terms = {
+            "payment_period": 30, # Default days
+            "honor_cert_period": 14, # Default days
+            "retention_percent": 10.0, # Default %
+            "retention_limit": 5.0 # Default %
+        }
     
-    col1, col2 = st.columns(2)
-    with col1:
-        # Case insensitive check will be handled in logic
-        bq_file = st.file_uploader("1. Upload BQ (PDF, Excel, CSV)", type=["pdf", "xlsx", "xls", "csv"])
-    with col2:
-        sor_file = st.file_uploader("2. Upload JKR SOR Reference (PDF)", type=["pdf"])
+    # --- TAB 1: AI CONTRACT SCANNER ---
+    with tab1:
+        st.subheader("Step 1: Define the 'Money Rules'")
+        st.info("Upload the Contract/Tender Document to auto-extract payment terms.")
         
-    if bq_file and st.button("🚀 Analyze & Estimate"):
-        with st.spinner("Processing Data..."):
-            
-            # 1. SAVE BQ
-            save_to_project(current_project, bq_file.getbuffer(), bq_file.name, "Tenders/01_BQ_Documents")
-            
-            inputs = []
-            prompt_context = ""
+        contract_file = st.file_uploader("Upload Contract (PDF)", type=["pdf"], key="comm_pdf")
+        
+        col_a, col_b = st.columns(2)
+        
+        # Manual Override Inputs (Pre-filled by AI later)
+        with col_a:
+            p_period = st.number_input("Payment Period (Days)", value=st.session_state.comm_terms['payment_period'])
+            h_period = st.number_input("Honouring Cert. Period (Days)", value=st.session_state.comm_terms['honor_cert_period'])
+        with col_b:
+            r_percent = st.number_input("Retention (%)", value=st.session_state.comm_terms['retention_percent'])
+            r_limit = st.number_input("Limit of Retention (%)", value=st.session_state.comm_terms['retention_limit'])
 
-            # 2. HANDLING EXCEL vs PDF (ROBUST CHECK)
-            file_ext = os.path.splitext(bq_file.name)[1].lower()
-            
-            if file_ext in ['.xlsx', '.xls', '.csv']:
-                # If Excel, read it as text/dataframe
-                try:
-                    if file_ext == '.csv':
-                        df = pd.read_csv(bq_file)
-                    else:
-                        df = pd.read_excel(bq_file)
-                    
-                    # Convert data to string for AI
-                    bq_text_data = df.to_string()
-                    prompt_context += f"\n\nBQ DATA (From Excel):\n{bq_text_data}\n"
-                    st.success("✅ Excel BQ read successfully.")
-                    
-                except ImportError:
-                    st.error("Missing dependency. Run: pip install openpyxl")
-                    st.stop()
-                except Exception as e:
-                    st.error(f"Error reading Excel: {e}")
-                    st.stop()
-            else:
-                # If PDF, upload to Vision
-                with open("temp_bq.pdf", "wb") as f: f.write(bq_file.getbuffer())
-                sample_bq = genai.upload_file(path="temp_bq.pdf", display_name="BQ")
-                inputs.append(sample_bq)
+        # AI TRIGGER
+        if contract_file and st.button("🔍 AI: Extract Terms"):
+            with st.spinner("Reading Contract Clauses..."):
+                # Save and Upload
+                with open("temp_contract.pdf", "wb") as f: f.write(contract_file.getbuffer())
+                sample_file = genai.upload_file(path="temp_contract.pdf", display_name="Contract", mime_type="application/pdf")
+                while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
 
-            # 3. HANDLING SOR PDF
-            if sor_file:
-                save_to_project(current_project, sor_file.getbuffer(), "JKR_SOR.pdf", "Tenders/02_Supplier_Quotes")
-                with open("temp_sor.pdf", "wb") as f: f.write(sor_file.getbuffer())
-                sample_sor = genai.upload_file(path="temp_sor.pdf", display_name="SOR")
-                inputs.append(sample_sor)
-                prompt_context += "\nREFERENCE: Use the rates in the uploaded 'JKR SOR' PDF as the official benchmark."
-            else:
-                prompt_context += "\nREFERENCE: Use internal knowledge of JKR Sarawak rates."
-
-            # 4. WAIT FOR PROCESSING (CRITICAL SAFETY CHECK)
-            for f in inputs:
-                while f.state.name == "PROCESSING":
-                    time.sleep(2)
-                    f = genai.get_file(f.name)
+                # STRICT JSON PROMPT
+                prompt = """
+                Analyze the attached construction contract. Extract these 4 numerical values.
+                Return ONLY a JSON string like this: {"payment_period": 30, "honor_cert_period": 14, "retention_percent": 10, "retention_limit": 5}
+                Rules:
+                1. 'Period of Honouring Certificates' (Architect to certify).
+                2. 'Period of Payment' (Client to pay after cert).
+                3. 'Retention Percentage'.
+                4. 'Limit of Retention' (Percentage of Contract Sum).
+                If not found, use standard PAM 2018 values.
+                """
+                response = model.generate_content([prompt, sample_file])
                 
-                if f.state.name == "FAILED":
-                    st.error("Error: Google failed to process one of the files. Please retry.")
-                    st.stop()
+                try:
+                    # Clean the response to get pure JSON
+                    import json
+                    json_str = response.text.replace("```json", "").replace("```", "").strip()
+                    extracted = json.loads(json_str)
+                    
+                    # Update Session State
+                    st.session_state.comm_terms.update(extracted)
+                    st.success("✅ Terms Extracted! Go to 'Project Schedule' tab.")
+                    st.rerun() # Refresh to update the number inputs
+                except:
+                    st.error("AI read the file but couldn't format the JSON perfectly. Please update the numbers manually above.")
+                    st.write(response.text)
 
-            # 5. PROMPT
-            final_prompt = f"""
-            You are a Senior Estimator in Sarawak.
+    # --- TAB 2: SCHEDULE (THE TIME DIMENSION) ---
+    with tab2:
+        st.subheader("Step 2: The Programme of Works")
+        
+        # Default Data
+        if "schedule_df" not in st.session_state:
+            data = {
+                "Activity": ["Preliminaries", "Piling Works", "Substructure", "Superstructure (Frame)", "Architecture", "M&E First Fix"],
+                "Start Date": [pd.to_datetime("2025-01-01"), pd.to_datetime("2025-02-01"), pd.to_datetime("2025-03-01"), pd.to_datetime("2025-04-01"), pd.to_datetime("2025-06-01"), pd.to_datetime("2025-05-01")],
+                "End Date": [pd.to_datetime("2025-12-31"), pd.to_datetime("2025-02-28"), pd.to_datetime("2025-03-31"), pd.to_datetime("2025-06-30"), pd.to_datetime("2025-09-30"), pd.to_datetime("2025-08-30")],
+                "Value (RM)": [150000, 300000, 250000, 800000, 600000, 400000]
+            }
+            st.session_state.schedule_df = pd.DataFrame(data)
+
+        # Editable Table
+        edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True)
+        st.session_state.schedule_df = edited_df
+        
+        total_val = edited_df["Value (RM)"].sum()
+        st.metric("Total Contract Value", f"RM {total_val:,.2f}")
+
+    # --- TAB 3: CASH FLOW ENGINE ---
+    with tab3:
+        st.subheader("Step 3: Cash Flow Forecast")
+        
+        if st.button("🚀 Calculate Cash Flow"):
+            # 1. GET VARIABLES
+            df = st.session_state.schedule_df.copy()
+            pay_lag = st.session_state.comm_terms['payment_period'] + st.session_state.comm_terms['honor_cert_period']
+            ret_rate = st.session_state.comm_terms['retention_percent'] / 100
             
-            INPUTS:
-            1. Bill of Quantities (BQ) Data.
-            2. JKR Sarawak Schedule of Rates (SOR).
+            # 2. LOGIC: Shift Dates based on Contract Terms
+            # Convert dates to datetime objects just in case
+            df['End Date'] = pd.to_datetime(df['End Date'])
             
-            {prompt_context}
+            # Calculate The "Money Date" (When it actually hits bank)
+            df['Cash In Date'] = df['End Date'] + pd.Timedelta(days=pay_lag)
             
-            TASK:
-            1. MATCH items from BQ to JKR SOR.
-            2. ESTIMATE 'Actual Market Cost' in Sarawak (Material + Labour).
-            3. CALCULATE VARIANCE (Profit/Loss).
+            # Calculate Retention Deduction
+            df['Gross Claim'] = df['Value (RM)']
+            df['Retention'] = df['Gross Claim'] * ret_rate
+            df['Net Cash In'] = df['Gross Claim'] - df['Retention']
             
-            OUTPUT:
-            Markdown Table: | Description | Unit | Qty | JKR Rate (RM) | Market Cost (RM) | Variance |
-            """
+            # 3. AGGREGATE BY MONTH
+            df['Month'] = df['Cash In Date'].dt.to_period('M')
+            cash_flow = df.groupby('Month')[['Net Cash In']].sum().reset_index()
+            cash_flow['Month'] = cash_flow['Month'].astype(str)
+            cash_flow['Cumulative Cash'] = cash_flow['Net Cash In'].cumsum()
             
-            response = model.generate_content(inputs + [final_prompt])
+            # 4. VISUALIZE
+            st.bar_chart(cash_flow, x='Month', y='Net Cash In', color="#00FF00")
             
+            st.write("### 📉 Cash Flow Table")
+            st.dataframe(cash_flow)
+            
+            # 5. AI ADVISOR
             st.markdown("---")
-            st.subheader("📊 Cost Analysis")
-            st.markdown(response.text)
-            
-            save_text_to_project(current_project, response.text, "Cost_Estimate.md", "Tenders/03_Cost_Analysis")
+            st.subheader("🤖 AI Commercial Advisor")
+            st.write(f"**Analysis:** Based on your contract, you have a **{pay_lag}-day cash lag** on every claim.")
+            if cash_flow['Net Cash In'].iloc[0] == 0:
+                st.warning("⚠️ Warning: No cash inflow in the first month. Ensure you have bridge financing.")
