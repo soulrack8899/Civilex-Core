@@ -356,17 +356,19 @@ elif menu == "💰 Smart Estimator (Pre-Contract)": # You can rename this to "�
                     st.error("AI read the file but couldn't format the JSON perfectly. Please update the numbers manually above.")
                     st.write(response.text)
 
-    # --- TAB 2: SCHEDULE (THE TIME DIMENSION) ---
+    # --- TAB 2: SCHEDULE (PROFIT VS COST) ---
     with tab2:
-        st.subheader("Step 2: The Programme of Works")
+        st.subheader("Step 2: The Programme (Value vs Cost)")
+        st.info("Input the 'Value' (what you claim) and 'Cost' (what you pay sub-cons/suppliers).")
         
-        # Default Data
+        # Default Data with COST column added
         if "schedule_df" not in st.session_state:
             data = {
-                "Activity": ["Preliminaries", "Piling Works", "Substructure", "Superstructure (Frame)", "Architecture", "M&E First Fix"],
+                "Activity": ["Preliminaries", "Piling Works", "Substructure", "Superstructure", "Architecture", "M&E First Fix"],
                 "Start Date": [pd.to_datetime("2025-01-01"), pd.to_datetime("2025-02-01"), pd.to_datetime("2025-03-01"), pd.to_datetime("2025-04-01"), pd.to_datetime("2025-06-01"), pd.to_datetime("2025-05-01")],
                 "End Date": [pd.to_datetime("2025-12-31"), pd.to_datetime("2025-02-28"), pd.to_datetime("2025-03-31"), pd.to_datetime("2025-06-30"), pd.to_datetime("2025-09-30"), pd.to_datetime("2025-08-30")],
-                "Value (RM)": [150000, 300000, 250000, 800000, 600000, 400000]
+                "Value (RM)": [150000, 300000, 250000, 800000, 600000, 400000],
+                "Cost (RM)":  [100000, 240000, 200000, 650000, 480000, 320000] # Your predicted expenses
             }
             st.session_state.schedule_df = pd.DataFrame(data)
 
@@ -374,46 +376,78 @@ elif menu == "💰 Smart Estimator (Pre-Contract)": # You can rename this to "�
         edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True)
         st.session_state.schedule_df = edited_df
         
+        # Metrics
         total_val = edited_df["Value (RM)"].sum()
-        st.metric("Total Contract Value", f"RM {total_val:,.2f}")
-
-    # --- TAB 3: CASH FLOW ENGINE ---
-    with tab3:
-        st.subheader("Step 3: Cash Flow Forecast")
+        total_cost = edited_df["Cost (RM)"].sum()
+        projected_margin = total_val - total_cost
         
-        if st.button("🚀 Calculate Cash Flow"):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Contract Value", f"RM {total_val:,.0f}")
+        c2.metric("Total Est. Cost", f"RM {total_cost:,.0f}")
+        c3.metric("Projected Profit", f"RM {projected_margin:,.0f}", delta_color="normal")
+
+    # --- TAB 3: THE "RED ZONE" ENGINE ---
+    with tab3:
+        st.subheader("Step 3: Cash Flow Survival Check")
+        
+        if st.button("🚀 Run Simulation"):
             # 1. GET VARIABLES
             df = st.session_state.schedule_df.copy()
             pay_lag = st.session_state.comm_terms['payment_period'] + st.session_state.comm_terms['honor_cert_period']
             ret_rate = st.session_state.comm_terms['retention_percent'] / 100
             
-            # 2. LOGIC: Shift Dates based on Contract Terms
-            # Convert dates to datetime objects just in case
+            # 2. CALCULATE DATES
             df['End Date'] = pd.to_datetime(df['End Date'])
-            
-            # Calculate The "Money Date" (When it actually hits bank)
+            # Money IN (Claims) arrives LATER (Lagged)
             df['Cash In Date'] = df['End Date'] + pd.Timedelta(days=pay_lag)
+            # Money OUT (Expenses) goes out NOW (Assume end of work month)
+            # Note: You can add a "Supplier Credit Term" lag here if you want more accuracy
+            df['Cash Out Date'] = df['End Date'] 
             
-            # Calculate Retention Deduction
+            # 3. CALCULATE AMOUNTS
             df['Gross Claim'] = df['Value (RM)']
             df['Retention'] = df['Gross Claim'] * ret_rate
             df['Net Cash In'] = df['Gross Claim'] - df['Retention']
             
-            # 3. AGGREGATE BY MONTH
-            df['Month'] = df['Cash In Date'].dt.to_period('M')
-            cash_flow = df.groupby('Month')[['Net Cash In']].sum().reset_index()
-            cash_flow['Month'] = cash_flow['Month'].astype(str)
-            cash_flow['Cumulative Cash'] = cash_flow['Net Cash In'].cumsum()
+            # 4. PREPARE TIMELINE DATA
+            # We need to merge Inflow and Outflow onto a single timeline
+            inflow = df[['Cash In Date', 'Net Cash In']].rename(columns={'Cash In Date': 'Date', 'Net Cash In': 'Amount'})
+            inflow['Type'] = 'Cash In'
             
-            # 4. VISUALIZE
-            st.bar_chart(cash_flow, x='Month', y='Net Cash In', color="#00FF00")
+            outflow = df[['Cash Out Date', 'Cost (RM)']].rename(columns={'Cash Out Date': 'Date', 'Cost (RM)': 'Amount'})
+            outflow['Amount'] = outflow['Amount'] * -1 # Make expenses negative
+            outflow['Type'] = 'Cash Out'
             
-            st.write("### 📉 Cash Flow Table")
-            st.dataframe(cash_flow)
+            # Combine
+            timeline = pd.concat([inflow, outflow])
+            timeline['Date'] = pd.to_datetime(timeline['Date'])
+            timeline['Month'] = timeline['Date'].dt.to_period('M')
             
-            # 5. AI ADVISOR
+            # Group by Month
+            monthly_flow = timeline.groupby('Month')['Amount'].sum().reset_index()
+            monthly_flow['Month_Str'] = monthly_flow['Month'].astype(str)
+            monthly_flow['Cumulative Balance'] = monthly_flow['Amount'].cumsum()
+            
+            # 5. VISUALIZE THE DANGER ZONE
+            st.write("### 📉 The 'Survival Curve'")
+            st.caption("The Red Line is your Bank Balance. If it goes below 0, you need an overdraft.")
+            
+            # Create a dedicated line chart for Balance
+            st.line_chart(monthly_flow, x='Month_Str', y='Cumulative Balance')
+            
+            # 6. CRITICAL ANALYSIS (AI LOGIC)
+            min_balance = monthly_flow['Cumulative Balance'].min()
+            breakeven_month = monthly_flow.loc[monthly_flow['Cumulative Balance'] >= 0, 'Month_Str'].min()
+            
             st.markdown("---")
-            st.subheader("🤖 AI Commercial Advisor")
-            st.write(f"**Analysis:** Based on your contract, you have a **{pay_lag}-day cash lag** on every claim.")
-            if cash_flow['Net Cash In'].iloc[0] == 0:
-                st.warning("⚠️ Warning: No cash inflow in the first month. Ensure you have bridge financing.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if min_balance < 0:
+                    st.error(f"⚠️ DANGER: Maximum Cash Deficit: RM {min_balance:,.2f}")
+                    st.write(f"You need at least **RM {abs(min_balance):,.0f}** in the bank/overdraft to survive this project.")
+                else:
+                    st.success("✅ Safe: You are cash positive throughout.")
+            
+            with c2:
+                 st.info(f"📅 Breakeven Month: {breakeven_month}")
+                 st.write("This is when the project starts paying for itself.")
