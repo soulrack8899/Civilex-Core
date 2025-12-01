@@ -352,11 +352,11 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
                     st.error("AI read the file but couldn't format the JSON perfectly. Please update the numbers manually above.")
                     st.write(response.text)
 
-    # --- TAB 2: SCHEDULE (PROFIT VS COST) ---
+   # --- TAB 2: SCHEDULE (PROFIT VS COST) ---
     with tab2:
         st.subheader("Step 2: The Programme (Value vs Cost)")
         
-        # 1. AI SCHEDULE IMPORTER (NEW!)
+        # 1. AI SCHEDULE IMPORTER
         st.info("Upload your Work Programme or BQ (PDF) to auto-fill the table.")
         schedule_file = st.file_uploader("Upload Schedule/BQ (PDF)", type=["pdf"], key="sched_pdf")
         
@@ -388,6 +388,13 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
                     # Convert to DataFrame
                     new_df = pd.DataFrame(extracted_data)
                     
+                    # --- FIX: RENAME COLUMNS TO MATCH APP STANDARD ---
+                    # The AI gives "Value", but we need "Value (RM)"
+                    new_df = new_df.rename(columns={
+                        "Value": "Value (RM)", 
+                        "Cost": "Cost (RM)"
+                    })
+                    
                     # Fix Dates
                     new_df["Start Date"] = pd.to_datetime(new_df["Start Date"])
                     new_df["End Date"] = pd.to_datetime(new_df["End Date"])
@@ -401,17 +408,22 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
                     st.write(e)
 
         # 2. MANUAL TABLE (Updated for Decimals)
-        # We enforce "float" type (decimals) by using 0.0 instead of 0
         if "schedule_df" not in st.session_state:
             data = {
                 "Activity": ["Preliminaries", "Piling Works", "Substructure", "Superstructure", "Architecture", "M&E First Fix"],
                 "Start Date": [pd.to_datetime("2025-01-01"), pd.to_datetime("2025-02-01"), pd.to_datetime("2025-03-01"), pd.to_datetime("2025-04-01"), pd.to_datetime("2025-06-01"), pd.to_datetime("2025-05-01")],
                 "End Date": [pd.to_datetime("2025-12-31"), pd.to_datetime("2025-02-28"), pd.to_datetime("2025-03-31"), pd.to_datetime("2025-06-30"), pd.to_datetime("2025-09-30"), pd.to_datetime("2025-08-30")],
-                # IMPORTANT: Use 0.0 to force float type
                 "Value (RM)": [150000.0, 300000.50, 250000.0, 800000.0, 600000.0, 400000.0],
                 "Cost (RM)":  [100000.0, 240000.0, 200000.0, 650000.0, 480000.0, 320000.0] 
             }
             st.session_state.schedule_df = pd.DataFrame(data)
+
+        # Safety Check: Ensure columns exist before display
+        # This prevents the crash if the rename failed or session state is old
+        required_cols = ["Value (RM)", "Cost (RM)"]
+        for col in required_cols:
+            if col not in st.session_state.schedule_df.columns:
+                st.session_state.schedule_df[col] = 0.0
 
         # Configure columns to allow cents and formatting
         column_config = {
@@ -439,15 +451,21 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
         st.session_state.schedule_df = edited_df
         
         # Metrics
-        total_val = edited_df["Value (RM)"].sum()
-        total_cost = edited_df["Cost (RM)"].sum()
-        projected_margin = total_val - total_cost
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Contract Value", f"RM {total_val:,.2f}")
-        c2.metric("Total Est. Cost", f"RM {total_cost:,.2f}")
-        c3.metric("Projected Profit", f"RM {projected_margin:,.2f}", delta_color="normal")
-        
+        # Wrapped in try/except to prevent crash during editing
+        try:
+            total_val = edited_df["Value (RM)"].sum()
+            total_cost = edited_df["Cost (RM)"].sum()
+            projected_margin = total_val - total_cost
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Contract Value", f"RM {total_val:,.2f}")
+            c2.metric("Total Est. Cost", f"RM {total_cost:,.2f}")
+            c3.metric("Projected Profit", f"RM {projected_margin:,.2f}", delta_color="normal")
+        except KeyError:
+            st.warning("Resetting table structure...")
+            del st.session_state.schedule_df
+            st.rerun()
+
     # --- TAB 3: THE "RED ZONE" ENGINE (UPDATED) ---
     with tab3:
         st.subheader("Step 3: Cash Flow Survival Check")
