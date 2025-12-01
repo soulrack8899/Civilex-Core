@@ -355,21 +355,87 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
     # --- TAB 2: SCHEDULE (PROFIT VS COST) ---
     with tab2:
         st.subheader("Step 2: The Programme (Value vs Cost)")
-        st.info("Input the 'Value' (what you claim) and 'Cost' (what you pay sub-cons/suppliers).")
         
-        # Default Data with COST column added
+        # 1. AI SCHEDULE IMPORTER (NEW!)
+        st.info("Upload your Work Programme or BQ (PDF) to auto-fill the table.")
+        schedule_file = st.file_uploader("Upload Schedule/BQ (PDF)", type=["pdf"], key="sched_pdf")
+        
+        if schedule_file and st.button("🚀 AI: Extract Schedule Data"):
+            with st.spinner("Analyzing Schedule/BQ..."):
+                # Save & Upload
+                with open("temp_schedule.pdf", "wb") as f: f.write(schedule_file.getbuffer())
+                sample_file = genai.upload_file(path="temp_schedule.pdf", display_name="Schedule", mime_type="application/pdf")
+                while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
+
+                # Prompt for Tabular Data
+                prompt = """
+                Analyze this construction document. Extract the project schedule items.
+                Return ONLY a JSON list of objects.
+                Format: [{"Activity": "Description", "Start Date": "YYYY-MM-DD", "End Date": "YYYY-MM-DD", "Value": 1000.50, "Cost": 800.00}]
+                Rules:
+                1. Look for Activity Names, Dates, and Amounts.
+                2. If "Cost" is not listed, estimate it as 80% of "Value".
+                3. Ensure numbers are floats (allow decimals).
+                """
+                response = model.generate_content([prompt, sample_file])
+                
+                try:
+                    import json
+                    # Clean markdown formatting if present
+                    json_str = response.text.replace("```json", "").replace("```", "").strip()
+                    extracted_data = json.loads(json_str)
+                    
+                    # Convert to DataFrame
+                    new_df = pd.DataFrame(extracted_data)
+                    
+                    # Fix Dates
+                    new_df["Start Date"] = pd.to_datetime(new_df["Start Date"])
+                    new_df["End Date"] = pd.to_datetime(new_df["End Date"])
+                    
+                    # Update Session State
+                    st.session_state.schedule_df = new_df
+                    st.success(f"✅ Extracted {len(new_df)} activities!")
+                    st.rerun()
+                except Exception as e:
+                    st.error("AI couldn't perfectly parse the table. It might be too complex. Try manual entry for now.")
+                    st.write(e)
+
+        # 2. MANUAL TABLE (Updated for Decimals)
+        # We enforce "float" type (decimals) by using 0.0 instead of 0
         if "schedule_df" not in st.session_state:
             data = {
                 "Activity": ["Preliminaries", "Piling Works", "Substructure", "Superstructure", "Architecture", "M&E First Fix"],
                 "Start Date": [pd.to_datetime("2025-01-01"), pd.to_datetime("2025-02-01"), pd.to_datetime("2025-03-01"), pd.to_datetime("2025-04-01"), pd.to_datetime("2025-06-01"), pd.to_datetime("2025-05-01")],
                 "End Date": [pd.to_datetime("2025-12-31"), pd.to_datetime("2025-02-28"), pd.to_datetime("2025-03-31"), pd.to_datetime("2025-06-30"), pd.to_datetime("2025-09-30"), pd.to_datetime("2025-08-30")],
-                "Value (RM)": [150000, 300000, 250000, 800000, 600000, 400000],
-                "Cost (RM)":  [100000, 240000, 200000, 650000, 480000, 320000] # Your predicted expenses
+                # IMPORTANT: Use 0.0 to force float type
+                "Value (RM)": [150000.0, 300000.50, 250000.0, 800000.0, 600000.0, 400000.0],
+                "Cost (RM)":  [100000.0, 240000.0, 200000.0, 650000.0, 480000.0, 320000.0] 
             }
             st.session_state.schedule_df = pd.DataFrame(data)
 
+        # Configure columns to allow cents and formatting
+        column_config = {
+            "Value (RM)": st.column_config.NumberColumn(
+                "Value (RM)",
+                format="RM %.2f", # Force 2 decimal places
+                step=0.01,         # Allow cent increments
+            ),
+            "Cost (RM)": st.column_config.NumberColumn(
+                "Cost (RM)",
+                format="RM %.2f",
+                step=0.01,
+            ),
+             "Start Date": st.column_config.DateColumn("Start Date", format="DD/MM/YYYY"),
+             "End Date": st.column_config.DateColumn("End Date", format="DD/MM/YYYY"),
+        }
+
         # Editable Table
-        edited_df = st.data_editor(st.session_state.schedule_df, num_rows="dynamic", use_container_width=True)
+        edited_df = st.data_editor(
+            st.session_state.schedule_df, 
+            column_config=column_config,
+            num_rows="dynamic", 
+            use_container_width=True
+        )
         st.session_state.schedule_df = edited_df
         
         # Metrics
@@ -378,10 +444,10 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
         projected_margin = total_val - total_cost
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total Contract Value", f"RM {total_val:,.0f}")
-        c2.metric("Total Est. Cost", f"RM {total_cost:,.0f}")
-        c3.metric("Projected Profit", f"RM {projected_margin:,.0f}", delta_color="normal")
-
+        c1.metric("Total Contract Value", f"RM {total_val:,.2f}")
+        c2.metric("Total Est. Cost", f"RM {total_cost:,.2f}")
+        c3.metric("Projected Profit", f"RM {projected_margin:,.2f}", delta_color="normal")
+        
     # --- TAB 3: THE "RED ZONE" ENGINE (UPDATED) ---
     with tab3:
         st.subheader("Step 3: Cash Flow Survival Check")
