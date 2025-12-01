@@ -140,7 +140,7 @@ with st.sidebar:
         ["📂 Document Scanner", 
          "✍️ Draft Reply/Defense", 
          "📝 Create Contract/Deed",
-         "💰 Smart Estimator (Pre-Contract)"])
+         "💰 Commercial Manager (Cash Flow)"]) # Renamed
     
     st.markdown("---")
 
@@ -184,14 +184,12 @@ if menu == "📂 Document Scanner":
                 if current_project: save_to_project(current_project, uploaded_file.getbuffer(), uploaded_file.name, "Incoming_Letters")
                 with open("temp.pdf", "wb") as f: f.write(uploaded_file.getbuffer())
                 
-                # Force MIME type for stability
                 sample_file = genai.upload_file(path="temp.pdf", display_name="Scan", mime_type="application/pdf")
                 
                 while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
 
                 prompt = f"{MY_CONTEXT}\n Forensic Audit. Identify Form & Year. Check LAD, Payment, Design Liability."
                 
-                # API FIX: Correct List Structure
                 response = model.generate_content([prompt, sample_file])
                 st.session_state.scan_report = response.text 
     
@@ -238,9 +236,7 @@ elif menu == "✍️ Draft Reply/Defense":
                 while sample_file.state.name == "PROCESSING": time.sleep(1); sample_file = genai.get_file(sample_file.name)
                 api_payload.append(sample_file)
 
-            # API FIX: Correct List Structure
             response = model.generate_content(api_payload)
-            
             if current_project: save_text_to_project(current_project, response.text, f"Draft_{int(time.time())}.txt", "Outgoing_Drafts")
             st.markdown("---")
             st.text_area("Result:", value=response.text, height=400)
@@ -284,7 +280,7 @@ elif menu == "📝 Create Contract/Deed":
 # ==========================================
 # MODULE 4: COMMERCIAL MANAGER (CASH FLOW)
 # ==========================================
-elif menu == "💰 Smart Estimator (Pre-Contract)": # You can rename this to "💰 Commercial Manager"
+elif menu == "💰 Commercial Manager (Cash Flow)":
     st.title("💰 Commercial Manager & Cash Flow")
     st.caption("Combine Contract Clauses with Project Schedule to predict Cash Flow.")
 
