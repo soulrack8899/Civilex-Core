@@ -382,68 +382,99 @@ elif menu == "💰 Commercial Manager (Cash Flow)":
         c2.metric("Total Est. Cost", f"RM {total_cost:,.0f}")
         c3.metric("Projected Profit", f"RM {projected_margin:,.0f}", delta_color="normal")
 
-    # --- TAB 3: THE "RED ZONE" ENGINE ---
+    # --- TAB 3: THE "RED ZONE" ENGINE (UPDATED) ---
     with tab3:
         st.subheader("Step 3: Cash Flow Survival Check")
         
+        # New: Input your starting position
+        start_balance = st.number_input("Starting Bank Balance / Overdraft (RM)", value=0.0, step=1000.0)
+
         if st.button("🚀 Run Simulation"):
             # 1. GET VARIABLES
             df = st.session_state.schedule_df.copy()
             pay_lag = st.session_state.comm_terms['payment_period'] + st.session_state.comm_terms['honor_cert_period']
-            ret_rate = st.session_state.comm_terms['retention_percent'] / 100
-            
+            ret_percent = st.session_state.comm_terms['retention_percent'] / 100
+            ret_limit_percent = st.session_state.comm_terms['retention_limit'] / 100
+            contract_sum = df['Value (RM)'].sum()
+            max_retention = contract_sum * ret_limit_percent
+
             # 2. CALCULATE DATES
             df['End Date'] = pd.to_datetime(df['End Date'])
-            # Money IN (Claims) arrives LATER (Lagged)
             df['Cash In Date'] = df['End Date'] + pd.Timedelta(days=pay_lag)
-            # Money OUT (Expenses) goes out NOW (Assume end of work month)
-            # Note: You can add a "Supplier Credit Term" lag here if you want more accuracy
-            df['Cash Out Date'] = df['End Date'] 
+            df['Cash Out Date'] = df['End Date'] # Assumes you pay suppliers same month (Conservative)
             
-            # 3. CALCULATE AMOUNTS
+            # 3. CALCULATE AMOUNTS (WITH RETENTION CAP)
             df['Gross Claim'] = df['Value (RM)']
-            df['Retention'] = df['Gross Claim'] * ret_rate
+            
+            # Smart Retention Logic: Don't deduct if we already hit the limit
+            cumulative_retention = 0
+            retention_deductions = []
+            
+            for val in df['Gross Claim']:
+                potential_cut = val * ret_percent
+                if cumulative_retention + potential_cut > max_retention:
+                    actual_cut = max_retention - cumulative_retention
+                    cumulative_retention = max_retention
+                elif cumulative_retention >= max_retention:
+                    actual_cut = 0
+                else:
+                    actual_cut = potential_cut
+                    cumulative_retention += actual_cut
+                retention_deductions.append(actual_cut)
+            
+            df['Retention'] = retention_deductions
             df['Net Cash In'] = df['Gross Claim'] - df['Retention']
             
             # 4. PREPARE TIMELINE DATA
-            # We need to merge Inflow and Outflow onto a single timeline
+            # A. Construction Cash Flow
             inflow = df[['Cash In Date', 'Net Cash In']].rename(columns={'Cash In Date': 'Date', 'Net Cash In': 'Amount'})
-            inflow['Type'] = 'Cash In'
+            inflow['Type'] = 'Progress Payment'
             
             outflow = df[['Cash Out Date', 'Cost (RM)']].rename(columns={'Cash Out Date': 'Date', 'Cost (RM)': 'Amount'})
-            outflow['Amount'] = outflow['Amount'] * -1 # Make expenses negative
-            outflow['Type'] = 'Cash Out'
+            outflow['Amount'] = outflow['Amount'] * -1 
+            outflow['Type'] = 'Expenses'
+
+            # B. Retention Release (The "Bonus" Check)
+            # Assumption: 50% at last activity end, 50% 12 months later
+            last_date = df['End Date'].max()
+            ret_release_1 = {'Date': last_date + pd.Timedelta(days=pay_lag), 'Amount': cumulative_retention * 0.5, 'Type': 'Retention Release (CPC)'}
+            ret_release_2 = {'Date': last_date + pd.Timedelta(days=365), 'Amount': cumulative_retention * 0.5, 'Type': 'Retention Release (CMGD)'}
             
-            # Combine
-            timeline = pd.concat([inflow, outflow])
+            # Combine all flows
+            timeline_data = [inflow, outflow, pd.DataFrame([ret_release_1, ret_release_2])]
+            timeline = pd.concat(timeline_data)
+            
             timeline['Date'] = pd.to_datetime(timeline['Date'])
             timeline['Month'] = timeline['Date'].dt.to_period('M')
             
-            # Group by Month
+            # 5. AGGREGATE
             monthly_flow = timeline.groupby('Month')['Amount'].sum().reset_index()
             monthly_flow['Month_Str'] = monthly_flow['Month'].astype(str)
-            monthly_flow['Cumulative Balance'] = monthly_flow['Amount'].cumsum()
             
-            # 5. VISUALIZE THE DANGER ZONE
-            st.write("### 📉 The 'Survival Curve'")
-            st.caption("The Red Line is your Bank Balance. If it goes below 0, you need an overdraft.")
+            # Add Starting Balance to the first month calculation
+            monthly_flow['Cumulative Balance'] = monthly_flow['Amount'].cumsum() + start_balance
             
-            # Create a dedicated line chart for Balance
+            # 6. VISUALIZE
+            st.write("### 📊 Cash Flow Forecast")
+            
+            # Chart 1: Monthly Net Flow (Are we bleeding this month?)
+            st.caption("Monthly Net Flow (Green = Profit this month, Red = Loss this month)")
+            st.bar_chart(monthly_flow, x='Month_Str', y='Amount', color='#ffaa00')
+
+            # Chart 2: Bank Account Balance
+            st.caption("Bank Account Balance (The Survival Line)")
             st.line_chart(monthly_flow, x='Month_Str', y='Cumulative Balance')
             
-            # 6. CRITICAL ANALYSIS (AI LOGIC)
-            min_balance = monthly_flow['Cumulative Balance'].min()
-            breakeven_month = monthly_flow.loc[monthly_flow['Cumulative Balance'] >= 0, 'Month_Str'].min()
+            # 7. METRICS
+            min_bal = monthly_flow['Cumulative Balance'].min()
             
             st.markdown("---")
-            c1, c2 = st.columns(2)
-            with c1:
-                if min_balance < 0:
-                    st.error(f"⚠️ DANGER: Maximum Cash Deficit: RM {min_balance:,.2f}")
-                    st.write(f"You need at least **RM {abs(min_balance):,.0f}** in the bank/overdraft to survive this project.")
-                else:
-                    st.success("✅ Safe: You are cash positive throughout.")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Retention Held", f"RM {cumulative_retention:,.0f}")
             
-            with c2:
-                 st.info(f"📅 Breakeven Month: {breakeven_month}")
-                 st.write("This is when the project starts paying for itself.")
+            if min_bal < 0:
+                c2.metric("⚠️ Max Overdraft Needed", f"RM {min_bal:,.2f}", delta="-CRITICAL")
+                st.error(f"You will run out of cash. You need a facility of at least RM {abs(min_bal):,.0f}.")
+            else:
+                c2.metric("Lowest Bank Balance", f"RM {min_bal:,.2f}", delta="SAFE")
+                st.success("✅ You are cashflow positive throughout.")
